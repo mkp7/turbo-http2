@@ -41,7 +41,7 @@ const decodeConnectionPreface = buf => {
 
 const encodeFrameHeader = (length, type, flags, id) => {
   const buf = Buffer.alloc(9)
-  buf.writeUInt32BE(length >> 8, 0) // 24 bits frame length
+  buf.writeUInt32BE(length << 8, 0) // 24 bits frame length
   buf.writeUInt8(type, 3) // 8 bits frame type
   buf.writeUInt8(flags, 4) // 8 bits frame flags
   buf.writeUInt32BE(id, 5) // 32-1 bits stream id
@@ -125,7 +125,17 @@ class H2Instance {
     }
 
     // check END_STREAM (0x1) flag
-    // ...
+    if (header[2] & 0x1) {
+      console.log(`Writing HEADER frame on DATA receive`)
+      console.log(`END_STREAM ID: ${header[3]}`)
+      const HFrame = this.encodeHeaderFrame(header[3], { ':status': 200, date: (new Date()).toUTCString() }, 0 | 0x4)
+      this.socket.write(HFrame)
+      this.socket.write(this.encodeDataFrame(
+        header[3],
+        'hello world\n',
+        0 | 0x1
+      ))
+    }
 
     return [
       buf.slice(0, header[0]),
@@ -160,10 +170,15 @@ class H2Instance {
 
     // check END_STREAM (0x1) flag
     if (header[2] & 0x1) {
+      console.log(`Writing HEADER frame`)
       console.log(`END_STREAM ID: ${header[3]} END_HEADERS: ${header[2] & 0x4}`)
-      this.socket.write(this.encodeHeaderFrame(header[3], { ':status': '200' }, 0 | 0x1 | 0x4))
-      // this.socket.write(this.encodeDataFrame(header[3], 'hello world', 1))
-      // this.socket.write(encodeFrameHeader(0, 0, 0, header[3]))
+      const HFrame = this.encodeHeaderFrame(header[3], { ':status': '200', date: (new Date()).toUTCString() }, 0 | 0x4)
+      this.socket.write(HFrame)
+      this.socket.write(this.encodeDataFrame(
+        header[3],
+        'hello world\n',
+        0 | 0x1
+      ))
     }
 
     return [
@@ -312,7 +327,7 @@ class H2Instance {
 
       // send (write) initial empty settings frame
       this.socket.write(encodeFrameHeader(0, 4, 0, 0))
-      this.socket.write(encodeFrameHeader(0, 4, 1, 0))
+      this.socket.write(encodeFrameHeader(0, 4, 0 | 0x1, 0))
       // this.socket.write(encodeFrameHeader(0, 4, 0, 0))
     }
 
