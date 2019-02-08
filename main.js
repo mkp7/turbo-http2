@@ -1,5 +1,7 @@
 const tls = require('tls')
 const fs = require('fs')
+const Compressor = require('./compressor').Compressor
+const Decompressor = require('./compressor').Decompressor
 
 const options = {
   key: fs.readFileSync('../localhost-key.pem'),
@@ -16,6 +18,19 @@ const options = {
 }
 
 const server = tls.createServer(options)
+
+const noop = () => {}
+
+const logger = {
+  fatal: noop,
+  error: noop,
+  warn: noop,
+  info: noop,
+  debug: noop,
+  trace: noop,
+
+  child: function () { return this }
+}
 
 const decodeConnectionPreface = buf => {
   // 24 octets connection preface
@@ -47,35 +62,41 @@ class H2Instance {
     this.settings = null
     this.streams = []
     this.decoders = [
-      this.decodeDataFrame, // DATA (0x0) frame decoder
-      this.decodeHeadersFrame, // HEADERS (0x1) frame decoder
-      this.decodePriorityFrame, // PRIORITY (0x2) frame decoder
-      this.decodeRstStreamFrame, // RST_STREAM (0x3) frame decoder
-      this.decodeSettingsFrame, // SETTINGS (0x4) frame decoder
+      this.decodeDataFrame.bind(this), // DATA (0x0) frame decoder
+      this.decodeHeadersFrame.bind(this), // HEADERS (0x1) frame decoder
+      this.decodePriorityFrame.bind(this), // PRIORITY (0x2) frame decoder
+      this.decodeRstStreamFrame.bind(this), // RST_STREAM (0x3) frame decoder
+      this.decodeSettingsFrame.bind(this), // SETTINGS (0x4) frame decoder
       undefined, // this.decodePushPromiseFrame, // PUSH_PROMISE (0x5) frame decoder
       undefined, // this.decodePingFrame, // PING (0x6) frame decoder
       undefined, // this.decodeGoawayFrame, // GOAWAY (0x7) frame decoder
-      this.decodeWindowUpdateFrame, // WINDOW_UPDATE (0x8) frame decoder
+      this.decodeWindowUpdateFrame.bind(this), // WINDOW_UPDATE (0x8) frame decoder
       undefined // this.decodeContinuationFrame // CONTINUATION (0x9) frame decoder
     ]
+    this._compressor = new Compressor(logger, 'RESPONSE')
+    this._decompressor = new Decompressor(logger, 'RESPONSE')
+    this.processFrames.bind(this)
+    // this.onData.bind(this)
+  }
+
+  encodeHeaderFrame (id, headers, flags) {
+    const frame = this._compressor.compress(headers)
+
+    return Buffer.concat([encodeFrameHeader(Buffer.byteLength(frame), 0x1, flags, id), frame])
+  }
+
+  encodeDataFrame (id, data, flags) {
+    return Buffer.concat([
+      encodeFrameHeader(Buffer.byteLength(Buffer.from(data)), 0x0, flags, id),
+      Buffer.from(data)
+    ])
   }
 
   decodeFrameHeader (buf) {
-  // Frame header is not complete
+    // Frame header is not complete
     if (Buffer.byteLength(buf) < 9) {
       return null
     }
-
-    // const frameHeader = new DataView(buf.buffer)
-    // ${frameHeader.getUint32(0) >> 8}
-    // ${frameHeader.getUint8(3)}
-    // ${frameHeader.getUint8(4)}
-    // ${frameHeader.getUint32(5)}
-
-    console.log(`Frame Length:\t${buf.readUInt32BE(0) >> 8}`)
-    console.log(`Frame Type:\t${buf.readUInt8(3)}`)
-    console.log(`Frame Flags:\t${buf.readUInt8(4)}`)
-    console.log(`Frame ID:\t${buf.readUInt32BE(5)}`)
 
     return [
       [
@@ -111,6 +132,7 @@ class H2Instance {
       buf.slice(header[0])
     ]
   }
+
   decodeHeadersFrame (header, buf) {
     if (Buffer.byteLength(buf) < header[0]) {
       // incomplete frame
@@ -121,7 +143,7 @@ class H2Instance {
     let [i, padding] = [0, 0]
     if (header[2] & 0x8) {
       padding = buf.readUInt8(0)
-      i = 8
+      i = 1
     }
 
     let [excl, strmDep, weight] = [0, 0, 0]
@@ -129,9 +151,19 @@ class H2Instance {
     if (header[2] & 0x20) {
       excl = buf.readUInt32BE(i) << 31 >> 31
       strmDep = buf.readUInt32BE(i) << 1 >> 1
-      i += 32
+      i += 4
       weight = buf.readUInt8(i)
-      i += 8
+      i += 1
+    }
+
+    console.log(this._decompressor.decompress(buf.slice(i, header[0] - padding)))
+
+    // check END_STREAM (0x1) flag
+    if (header[2] & 0x1) {
+      console.log(`END_STREAM ID: ${header[3]} END_HEADERS: ${header[2] & 0x4}`)
+      this.socket.write(this.encodeHeaderFrame(header[3], { ':status': '200' }, 0 | 0x1 | 0x4))
+      // this.socket.write(this.encodeDataFrame(header[3], 'hello world', 1))
+      // this.socket.write(encodeFrameHeader(0, 0, 0, header[3]))
     }
 
     return [
@@ -139,6 +171,7 @@ class H2Instance {
       buf.slice(header[0])
     ]
   }
+
   decodePriorityFrame (header, buf) {
     if (header[0] !== 5) {
       return null // stream error of type FRAME_SIZE_ERROR
@@ -149,6 +182,8 @@ class H2Instance {
       return null
     }
 
+    console.log(`Stream ID ${header[3]} depends on stream ID ${buf.readUInt32BE(0) << 1 >> 1}`)
+
     return [
       [
         buf.readUInt32BE(0) << 31 >> 31,
@@ -158,6 +193,7 @@ class H2Instance {
       buf.slice(5)
     ]
   }
+
   decodeRstStreamFrame (header, buf) {
     if (header[0] !== 4) {
       return null // stream error of type FRAME_SIZE_ERROR
@@ -170,6 +206,7 @@ class H2Instance {
 
     return [buf.readUInt32BE(0), buf.slice(4)]
   }
+
   decodeSettingsFrame (header, buf) {
     // type id is not of settings or frame id is not 0 or settings frame length is not multiple of 6
     if (header[1] !== 4 || header[3] !== 0 || header[0] % 6 !== 0) {
@@ -188,20 +225,32 @@ class H2Instance {
 
     return [settings, buf.slice(header[0])]
   }
+
   decodePushPromiseFrame (header, buf) {}
+
   decodePingFrame (header, buf) {}
+
   decodeGoawayFrame (header, buf) {}
+
   decodeWindowUpdateFrame (header, buf) {
-  // incomeplete frame
-    if (Buffer.byteLength(buf) < 32) {
+    // check frame length
+    if (header[0] !== 4) {
+      return null // connection error of type FRAME_SIZE_ERROR
+    }
+
+    // incomeplete frame
+    if (Buffer.byteLength(buf) < 4) {
       return null
     }
 
+    console.log(`WINDOW_UPDATE: ${buf.readUInt32BE(0) << 1 >> 1}`)
+
     return [
       buf.readUInt32BE(0) << 1 >> 1, // 31 bits
-      buf.slice(32)
+      buf.slice(4)
     ]
   }
+
   decodeContinuationFrame (header, buf) {}
 
   processFrames () {
@@ -215,14 +264,15 @@ class H2Instance {
       return
     }
 
+    console.log(`Frame type: ${data[0][1]}`)
     data = this.decoders[data[0][1]](...data)
 
     if (data === null) {
       return
     }
 
-    console.log(data[0])
     this.buffer = data[1]
+    // console.log(`Buffer length: ${Buffer.byteLength(this.buffer)}`)
     this.processFrames()
   }
 
@@ -241,7 +291,6 @@ class H2Instance {
 
     // after receiving connection preface, check whether initial SETTINGS is received
     if (this.validH2 && !this.validSettings) {
-      console.log('Settings Frame:')
       let data = this.decodeFrameHeader(this.buffer)
 
       // could not parse frame header
@@ -249,8 +298,7 @@ class H2Instance {
         return
       }
 
-      const [headers, rbuf] = data
-      data = this.decodeSettingsFrame(headers, rbuf)
+      data = this.decodeSettingsFrame(...data)
 
       // could not decode frame
       if (data === null) {
@@ -260,9 +308,12 @@ class H2Instance {
       this.settings = data[0]
       this.buffer = data[1]
       this.validSettings = true
+      console.log('Initial SETTINGS confirmed\n')
 
       // send (write) initial empty settings frame
+      this.socket.write(encodeFrameHeader(0, 4, 0, 0))
       this.socket.write(encodeFrameHeader(0, 4, 1, 0))
+      // this.socket.write(encodeFrameHeader(0, 4, 0, 0))
     }
 
     if (!(this.validH2 && this.validSettings)) {
@@ -276,7 +327,6 @@ class H2Instance {
 server.on('secureConnection', sock => {
   console.log(sock.authorized, sock.authorizationError, sock.alpnProtocol)
 
-  // let gbuf = Buffer.from('')
   const h2Sock = new H2Instance(sock)
   sock.on('data', h2Sock.onData.bind(h2Sock))
 })
