@@ -71,7 +71,7 @@ class H2Instance {
       undefined, // this.decodePingFrame, // PING (0x6) frame decoder
       undefined, // this.decodeGoawayFrame, // GOAWAY (0x7) frame decoder
       this.decodeWindowUpdateFrame.bind(this), // WINDOW_UPDATE (0x8) frame decoder
-      undefined // this.decodeContinuationFrame // CONTINUATION (0x9) frame decoder
+      this.decodeContinuationFrame.bind(this) // CONTINUATION (0x9) frame decoder
     ]
     this._compressor = new Compressor(logger, 'RESPONSE')
     this._decompressor = new Decompressor(logger, 'RESPONSE')
@@ -166,7 +166,8 @@ class H2Instance {
       i += 1
     }
 
-    console.log(this._decompressor.decompress(buf.slice(i, header[0] - padding)))
+    const headers = this._decompressor.decompress(buf.slice(i, header[0] - padding))
+    console.log(headers)
 
     // check END_STREAM (0x1) flag
     if (header[2] & 0x1) {
@@ -182,7 +183,7 @@ class H2Instance {
     }
 
     return [
-      buf.slice(i, header[0] - padding),
+      headers,
       buf.slice(header[0])
     ]
   }
@@ -266,7 +267,24 @@ class H2Instance {
     ]
   }
 
-  decodeContinuationFrame (header, buf) {}
+  decodeContinuationFrame (header, buf) {
+    if (Buffer.byteLength(buf) < header[0]) {
+      // incomplete frame
+      return null
+    }
+
+    const headers = console.log(this._decompressor.decompress(buf.slice(0, header[0])))
+
+    // check END_HEADERS (0x4) flag
+    if (header[2] & 0x4) {
+      // end of headers...
+    }
+
+    return [
+      headers,
+      buf.slice(header[0])
+    ]
+  }
 
   processFrames () {
     let data = this.decodeFrameHeader(this.buffer)
@@ -346,6 +364,8 @@ server.on('secureConnection', sock => {
   sock.on('data', h2Sock.onData.bind(h2Sock))
 })
 
-server.listen(8000, () => {
-  console.log('server bound')
+let port = process.env.PORT || 8000
+
+server.listen(port, () => {
+  console.log(`server bound on ${port}`)
 })
