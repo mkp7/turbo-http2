@@ -24,8 +24,9 @@ const decodeConnectionPreface = buf => {
 }
 
 class H2Connection {
-  constructor (socket) {
+  constructor (socket, routes) {
     this.socket = socket
+    this.routes = routes
     this.buffer = Buffer.from('')
     this.prefaceReceived = false
     this.settingsReceived = false
@@ -59,12 +60,17 @@ class H2Connection {
       case 0: // DATA (0x0) frame
       case 1: // HEADERS (0x1) frame
       case 9: // CONTINUATION (0x9) frame
-        framePayload = decoders[frameHeader[0][1]](...frameHeader, this.socket, this._compressor, this._decompressor)
+        framePayload = decoders[frameHeader[0][1]](
+          ...frameHeader,
+          this.socket,
+          this._compressor,
+          this._decompressor
+        )
         break
-      case 2:
-      case 3:
-      case 4:
-      case 8:
+      case 2: // PRIORITY (0x2) frame
+      case 3: // RST_STREAM (0x3) frame
+      case 4: // SETTINGS (0x4) frame
+      case 8: // WINDOW_UPDATE (0x8) frame
         framePayload = decoders[frameHeader[0][1]](...frameHeader)
         break
     }
@@ -73,8 +79,11 @@ class H2Connection {
       return
     }
 
+    // decoders should return stream object and remaining buf
+    // based on the state of stream, process the request
+    // generate the response and write it in frames
+
     this.buffer = framePayload[1]
-    // console.log(`Buffer length: ${Buffer.byteLength(this.buffer)}`)
     this.processFrames()
   }
 

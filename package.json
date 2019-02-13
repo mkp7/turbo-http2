@@ -1,7 +1,11 @@
 {
-  "dependencies": {
-    "turbo-net": "^1.4.0"
-  },
+  "name": "turbo-http2",
+  "version": "0.0.9",
+  "description": "A simple HTTP/2 web server, a project at GeekSkool",
+  "main": "./main.js",
+  "repository": "github.com:mkp7/turbo-http2",
+  "author": "Mehulkumar <m3hul.g4m3r@gmail.com>",
+  "license": "MIT",
   "devDependencies": {
     "eslint": "^5.12.1",
     "eslint-config-standard": "^12.0.0",
