@@ -3,6 +3,7 @@ const Decompressor = require('./compressor').Decompressor
 const decoders = require('./decoders')
 const encoders = require('./encoders')
 const Stream = require('./stream')
+const getResponse = require('./response/get-response')
 
 const noop = () => {}
 
@@ -65,7 +66,7 @@ class H2Connection {
     } else {
       // new stream
       stream = new Stream(frameHeader[0][3])
-      this.streams.set(frameHeader[0][3], stream)
+      this.streams.set(stream.ID, stream)
     }
 
     let framePayload = null
@@ -108,18 +109,23 @@ class H2Connection {
     if (stream.isEnded()) {
       console.log(`> Stream HEADERS & DATA received, ID ${stream.ID}`)
 
+      const response = getResponse(
+        { headers: stream.HEADERS, body: stream.DATA },
+        this.routes
+      )
+
       // writing headers
       this.socket.write(encoders.encodeHeaderFrame(
-        frameHeader[0][3],
-        { ':status': 200, date: (new Date()).toUTCString() },
+        stream.ID,
+        { ...response.headers, date: (new Date()).toUTCString() },
         0 | 0x4,
         this._compressor
       ))
 
       // writing data
       this.socket.write(encoders.encodeDataFrame(
-        frameHeader[0][3],
-        'hello world\n',
+        stream.ID,
+        response.body,
         0 | 0x1
       ))
     }

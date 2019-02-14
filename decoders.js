@@ -36,7 +36,7 @@ const decodeFrameHeader = (buf) => {
   ]
 }
 
-const decodeDataFrame = (header, buf, socket, compressor, decompressor) => {
+const decodeDataFrame = (header, buf) => {
   if (Buffer.byteLength(buf) < header[0]) {
     // incomplete frame
     return null

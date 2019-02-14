@@ -9,8 +9,13 @@ const options = {
 const app = new Server()
 
 app.get('/', (req, res) => {
-  res.headers['Content-Type'] = 'text/plain'
   res.body = 'Hello World, from GeekSkool.'
+
+  return res
+})
+
+app.get('/ping', (req, res) => {
+  res.body = 'pong'
 
   return res
 })
