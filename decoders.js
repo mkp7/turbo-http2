@@ -1,10 +1,30 @@
-const encoders = require('./encoders')
+// function FrameHeader (length, type, flags, id) {
+//   this.length = length
+//   this.type = type
+//   this.flags = flags
+//   this.id = id
+// }
 
 const decodeFrameHeader = (buf) => {
   // Frame header is not complete
   if (Buffer.byteLength(buf) < 9) {
     return null
   }
+
+  // decode 8 bits flags
+  /*
+    const flags = buf.readUInt8(3)
+    [
+      (flags & (1 << 0)) !== 0,
+      (flags & (1 << 1)) !== 0,
+      (flags & (1 << 2)) !== 0,
+      (flags & (1 << 3)) !== 0,
+      (flags & (1 << 4)) !== 0,
+      (flags & (1 << 5)) !== 0,
+      (flags & (1 << 6)) !== 0,
+      (flags & (1 << 7)) !== 0,
+    ]
+   */
 
   return [
     [
@@ -32,26 +52,13 @@ const decodeDataFrame = (header, buf, socket, compressor, decompressor) => {
     ]
   }
 
-  // check END_STREAM (0x1) flag
-  if (header[2] & 0x1) {
-    console.log(`Writing HEADER frame on DATA receive`)
-    console.log(`END_STREAM ID: ${header[3]}`)
-    const HFrame = encoders.encodeHeaderFrame(header[3], { ':status': 200, date: (new Date()).toUTCString() }, 0 | 0x4, compressor)
-    socket.write(HFrame)
-    socket.write(encoders.encodeDataFrame(
-      header[3],
-      'hello world\n',
-      0 | 0x1
-    ))
-  }
-
   return [
     buf.slice(0, header[0]),
     buf.slice(header[0])
   ]
 }
 
-const decodeHeadersFrame = (header, buf, socket, compressor, decompressor) => {
+const decodeHeadersFrame = (header, buf, decompressor) => {
   if (Buffer.byteLength(buf) < header[0]) {
     // incomplete frame
     return null
@@ -77,19 +84,6 @@ const decodeHeadersFrame = (header, buf, socket, compressor, decompressor) => {
   const headers = decompressor.decompress(buf.slice(i, header[0] - padding))
   console.log(headers)
 
-  // check END_STREAM (0x1) flag
-  if (header[2] & 0x1) {
-    console.log(`Writing HEADER frame`)
-    console.log(`END_STREAM ID: ${header[3]} END_HEADERS: ${header[2] & 0x4}`)
-    const HFrame = encoders.encodeHeaderFrame(header[3], { ':status': '200', date: (new Date()).toUTCString() }, 0 | 0x4, compressor)
-    socket.write(HFrame)
-    socket.write(encoders.encodeDataFrame(
-      header[3],
-      'hello world\n',
-      0 | 0x1
-    ))
-  }
-
   return [
     headers,
     buf.slice(header[0])
@@ -106,7 +100,7 @@ const decodePriorityFrame = (header, buf) => {
     return null
   }
 
-  console.log(`Stream ID ${header[3]} depends on stream ID ${buf.readUInt32BE(0) << 1 >> 1}`)
+  console.log(`> Stream ID ${header[3]} depends on stream ID ${buf.readUInt32BE(0) << 1 >> 1}`)
 
   return [
     [
@@ -167,7 +161,7 @@ const decodeWindowUpdateFrame = (header, buf) => {
     return null
   }
 
-  console.log(`WINDOW_UPDATE: ${buf.readUInt32BE(0) << 1 >> 1}`)
+  console.log(`>> WINDOW_UPDATE: ${buf.readUInt32BE(0) << 1 >> 1}`)
 
   return [
     buf.readUInt32BE(0) << 1 >> 1, // 31 bits
@@ -175,7 +169,7 @@ const decodeWindowUpdateFrame = (header, buf) => {
   ]
 }
 
-const decodeContinuationFrame = (header, buf, socket, compressor, decompressor) => {
+const decodeContinuationFrame = (header, buf, decompressor) => {
   if (Buffer.byteLength(buf) < header[0]) {
     // incomplete frame
     return null

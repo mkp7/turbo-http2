@@ -35,7 +35,7 @@ function Server () {
     port = process.env.PORT || port || 8080
 
     server.listen(port, () => {
-      console.log(`server bound on ${port}`)
+      console.log(`>> server bound on ${port}`)
     })
   }
 }

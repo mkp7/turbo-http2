@@ -2,6 +2,7 @@ const Compressor = require('./compressor').Compressor
 const Decompressor = require('./compressor').Decompressor
 const decoders = require('./decoders')
 const encoders = require('./encoders')
+const Stream = require('./stream')
 
 const noop = () => {}
 
@@ -31,7 +32,7 @@ class H2Connection {
     this.prefaceReceived = false
     this.settingsReceived = false
     this.settings = null
-    this.streams = []
+    this.streams = new Map()
     this._compressor = new Compressor(logger, 'RESPONSE')
     this._decompressor = new Decompressor(logger, 'RESPONSE')
     this.processFrames.bind(this)
@@ -54,18 +55,41 @@ class H2Connection {
       return
     }
 
-    console.log(`Frame type: ${frameHeader[0][1]}`)
+    console.log(`> Frame type: ${frameHeader[0][1]}`)
+
+    // create or update stream object
+    let stream
+    if (this.streams.has(frameHeader[0][3])) {
+      // existing stream
+      stream = this.streams.get(frameHeader[0][3])
+    } else {
+      // new stream
+      stream = new Stream(frameHeader[0][3])
+      this.streams.set(frameHeader[0][3], stream)
+    }
+
     let framePayload = null
     switch (frameHeader[0][1]) {
       case 0: // DATA (0x0) frame
+        framePayload = decoders[0](...frameHeader)
+        if (framePayload === null) {
+          return // there may be an error
+        }
+        stream.onData(frameHeader[0][2], framePayload[0])
+        break
       case 1: // HEADERS (0x1) frame
+        framePayload = decoders[1](...frameHeader, this._decompressor)
+        if (framePayload === null) {
+          return // there may be an error
+        }
+        stream.onHeaders(frameHeader[0][2], framePayload[0])
+        break
       case 9: // CONTINUATION (0x9) frame
-        framePayload = decoders[frameHeader[0][1]](
-          ...frameHeader,
-          this.socket,
-          this._compressor,
-          this._decompressor
-        )
+        framePayload = decoders[9](...frameHeader, this._decompressor)
+        if (framePayload === null) {
+          return // there may be an error
+        }
+        stream.onHeaders(frameHeader[0][2], framePayload[0])
         break
       case 2: // PRIORITY (0x2) frame
       case 3: // RST_STREAM (0x3) frame
@@ -74,12 +98,31 @@ class H2Connection {
         framePayload = decoders[frameHeader[0][1]](...frameHeader)
         break
     }
+    // decoders should return stream object and remaining buf
 
     if (framePayload === null) {
       return
     }
 
-    // decoders should return stream object and remaining buf
+    // check END_STREAM (0x1) & END_HEADERS (0x4) flags
+    if (stream.isEnded()) {
+      console.log(`> Stream HEADERS & DATA received, ID ${stream.ID}`)
+
+      // writing headers
+      this.socket.write(encoders.encodeHeaderFrame(
+        frameHeader[0][3],
+        { ':status': 200, date: (new Date()).toUTCString() },
+        0 | 0x4,
+        this._compressor
+      ))
+
+      // writing data
+      this.socket.write(encoders.encodeDataFrame(
+        frameHeader[0][3],
+        'hello world\n',
+        0 | 0x1
+      ))
+    }
     // based on the state of stream, process the request
     // generate the response and write it in frames
 
