@@ -21,4 +21,13 @@ const encodeDataFrame = (id, data, flags) => {
   ])
 }
 
+const encodeWindowUpdateFrame = (id, size) => {
+  const data = Buffer.alloc(4)
+  data.writeInt32BE(size << 1 >> 1, 0)
+  return Buffer.concat([
+    encodeFrameHeader(4, 0x8, 0, id),
+    data
+  ])
+}
+
 module.exports = { encodeFrameHeader, encodeHeaderFrame, encodeDataFrame }

@@ -82,7 +82,6 @@ const decodeHeadersFrame = (header, buf, decompressor) => {
   }
 
   const headers = decompressor.decompress(buf.slice(i, header[0] - padding))
-  console.log(headers)
 
   return [
     headers,
@@ -125,6 +124,14 @@ const decodeRstStreamFrame = (header, buf) => {
   return [buf.readUInt32BE(0), buf.slice(4)]
 }
 
+const SETTINGS = {
+  1: 'SETTINGS_HEADER_TABLE_SIZE',
+  2: 'SETTINGS_ENABLE_PUSH',
+  3: 'SETTINGS_MAX_CONCURRENT_STREAMS',
+  4: 'SETTINGS_INITIAL_WINDOW_SIZE',
+  5: 'SETTINGS_MAX_FRAME_SIZE',
+  6: 'SETTINGS_MAX_HEADER_LIST_SIZE'
+}
 const decodeSettingsFrame = (header, buf) => {
   // type id is not of settings or frame id is not 0 or settings frame length is not multiple of 6
   if (header[1] !== 4 || header[3] !== 0 || header[0] % 6 !== 0) {
@@ -136,9 +143,9 @@ const decodeSettingsFrame = (header, buf) => {
     return null
   }
 
-  const settings = new Map()
+  const settings = {}
   for (let i = 0; i < header[0]; i += 6) {
-    settings.set(buf.readUInt16BE(i), buf.readUInt32BE(i + 2))
+    settings[SETTINGS[buf.readUInt16BE(i)]] = buf.readUInt32BE(i + 2)
   }
 
   return [settings, buf.slice(header[0])]
@@ -175,7 +182,7 @@ const decodeContinuationFrame = (header, buf, decompressor) => {
     return null
   }
 
-  const headers = console.log(decompressor.decompress(buf.slice(0, header[0])))
+  const headers = decompressor.decompress(buf.slice(0, header[0]))
 
   // check END_HEADERS (0x4) flag
   if (header[2] & 0x4) {

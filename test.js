@@ -8,6 +8,8 @@ const options = {
 
 const app = new Server()
 
+app.static('/public')
+
 app.get('/', (req, res) => {
   res.body = 'Hello World, from GeekSkool.'
 

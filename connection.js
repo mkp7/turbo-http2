@@ -32,15 +32,42 @@ class H2Connection {
     this.buffer = Buffer.from('')
     this.prefaceReceived = false
     this.settingsReceived = false
-    this.settings = null
+    // initial connection-level settings
+    this.settings = {
+      SETTINGS_INITIAL_WINDOW_SIZE: 65535,
+      SETTINGS_MAX_FRAME_SIZE: 16384
+    }
     this.streams = new Map()
     this._compressor = new Compressor(logger, 'RESPONSE')
     this._decompressor = new Decompressor(logger, 'RESPONSE')
     this.processFrames.bind(this)
+    this.frameHandlers = [
+      this.onDataFrame,
+      this.onHeadersFrame,
+      this.onPriorityFrame,
+      this.onRstStreamFrame,
+      this.onSettingsFrame,
+      this.onPushPromiseFrame,
+      this.onPingFrame,
+      this.onGoAwayFrame,
+      this.onWindowUpdateFrame,
+      this.onContinuationFrame
+    ]
 
     // write connection preface (possibly empty SETTINGS frame)
     this.socket.write(encoders.encodeFrameHeader(0, 4, 0, 0))
   }
+
+  onDataFrame () {}
+  onHeadersFrame () {}
+  onPriorityFrame () {}
+  onRstStreamFrame () {}
+  onSettingsFrame () {}
+  onPushPromiseFrame () {}
+  onPingFrame () {}
+  onGoAwayFrame () {}
+  onWindowUpdateFrame () {}
+  onContinuationFrame () {}
 
   processFrames () {
     // decode frame header
@@ -107,13 +134,15 @@ class H2Connection {
 
     // check END_STREAM (0x1) & END_HEADERS (0x4) flags
     if (stream.isEnded()) {
-      console.log(`> Stream HEADERS & DATA received, ID ${stream.ID}`)
-
+      console.log('> Request received:')
+      console.log({ ':method': stream.HEADERS[':method'], ':path': stream.HEADERS[':path'] })
       const response = getResponse(
         { headers: stream.HEADERS, body: stream.DATA },
         this.routes
       )
 
+      console.log(`> Writing headers and data for Stream ID: ${stream.ID}`)
+      console.log(`> Response body length: ${Buffer.byteLength(response.body)}`)
       // writing headers
       this.socket.write(encoders.encodeHeaderFrame(
         stream.ID,
@@ -122,10 +151,22 @@ class H2Connection {
         this._compressor
       ))
 
+      // split data into window size frames
+      let data = Buffer.from(response.body)
+      while (Buffer.byteLength(data) > this.settings.SETTINGS_INITIAL_WINDOW_SIZE) {
+        // writing data
+        this.socket.write(encoders.encodeDataFrame(
+          stream.ID,
+          data.slice(0, this.settings.SETTINGS_INITIAL_WINDOW_SIZE),
+          0
+        ))
+        data = data.slice(this.settings.SETTINGS_INITIAL_WINDOW_SIZE)
+      }
+
       // writing data
       this.socket.write(encoders.encodeDataFrame(
         stream.ID,
-        response.body,
+        data,
         0 | 0x1
       ))
     }
@@ -169,13 +210,15 @@ class H2Connection {
       this.settings = data[0]
       this.buffer = data[1]
       this.settingsReceived = true
-      console.log('>> Initial SETTINGS received\n')
-      // write ACK SETTINGS for initial SETTINGS
+      console.log('>> Initial SETTINGS received')
+      console.log(this.settings)
+      // write SETTINGS ACK for initial SETTINGS
       this.socket.write(encoders.encodeFrameHeader(0, 4, 0 | 0x1, 0))
     }
 
+    // there maybe protocol error
     if (!(this.prefaceReceived && this.settingsReceived)) {
-      return // there maybe protocol error
+      return
     }
 
     this.processFrames()
