@@ -168,7 +168,7 @@ const decodeWindowUpdateFrame = (header, buf) => {
     return null
   }
 
-  console.log(`>> WINDOW_UPDATE: ${buf.readUInt32BE(0) << 1 >> 1}`)
+  console.log(`>> Stream ID ${header[3]} WINDOW_UPDATE: ${buf.readUInt32BE(0) << 1 >> 1}`)
 
   return [
     buf.readUInt32BE(0) << 1 >> 1, // 31 bits

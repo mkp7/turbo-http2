@@ -153,14 +153,14 @@ class H2Connection {
 
       // split data into window size frames
       let data = Buffer.from(response.body)
-      while (Buffer.byteLength(data) > this.settings.SETTINGS_INITIAL_WINDOW_SIZE) {
+      while (Buffer.byteLength(data) > this.settings.SETTINGS_MAX_FRAME_SIZE) {
         // writing data
         this.socket.write(encoders.encodeDataFrame(
           stream.ID,
-          data.slice(0, this.settings.SETTINGS_INITIAL_WINDOW_SIZE),
+          data.slice(0, this.settings.SETTINGS_MAX_FRAME_SIZE),
           0
         ))
-        data = data.slice(this.settings.SETTINGS_INITIAL_WINDOW_SIZE)
+        data = data.slice(this.settings.SETTINGS_MAX_FRAME_SIZE)
       }
 
       // writing data
@@ -207,7 +207,7 @@ class H2Connection {
         return
       }
 
-      this.settings = data[0]
+      this.settings = { ...this.settings, ...data[0] }
       this.buffer = data[1]
       this.settingsReceived = true
       console.log('>> Initial SETTINGS received')
