@@ -133,7 +133,7 @@ class H2Connection {
     }
 
     // check END_STREAM (0x1) & END_HEADERS (0x4) flags
-    if (stream.isEnded()) {
+    if (stream.isEnded() && stream.STATE !== 'closed') {
       console.log('> Request received:')
       console.log({ ':method': stream.HEADERS[':method'], ':path': stream.HEADERS[':path'] })
       const response = getResponse(
@@ -169,6 +169,8 @@ class H2Connection {
         data,
         0 | 0x1
       ))
+
+      stream.STATE = 'closed'
     }
     // based on the state of stream, process the request
     // generate the response and write it in frames
